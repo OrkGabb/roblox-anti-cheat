@@ -10,6 +10,5 @@ tickets. Movement/exploit detection (speed, teleport, fly, etc.) isn't in here y
 - `Core/` — the actual modules, config-injected, drop into `ServerScriptService`
 - `Core/README.md` — wiring guide
 - `STATUS.md` — where each module's design decisions came from
-- `EXTRACTION_LOG.md` — history of what was pulled from earlier projects and why
 
 Not production-ready yet. Treat everything here as subject to change.
