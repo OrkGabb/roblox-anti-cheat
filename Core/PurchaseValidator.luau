@@ -146,12 +146,22 @@ function PurchaseValidator.TryPurchase(player: Player, upgradeId: unknown): bool
 	end
 
 	-- Pre-check both balances so a player who can afford the base cost but
-	-- not the milestone is rejected before anything is deducted.
-	if CurrencyLedger.Get(player, baseCurrency) < cost then
-		return false
-	end
-	if milestoneCost > 0 and CurrencyLedger.Get(player, milestoneCurrency) < milestoneCost then
-		return false
+	-- not the milestone is rejected before anything is deducted. When both
+	-- costs are paid in the SAME currency the SUM is what must be covered —
+	-- two individually-sufficient checks against one balance would pass a
+	-- player who cannot afford both, sending them through a deduct-then-refund
+	-- round trip on every attempt.
+	if milestoneCost > 0 and milestoneCurrency == baseCurrency then
+		if CurrencyLedger.Get(player, baseCurrency) < cost + milestoneCost then
+			return false
+		end
+	else
+		if CurrencyLedger.Get(player, baseCurrency) < cost then
+			return false
+		end
+		if milestoneCost > 0 and CurrencyLedger.Get(player, milestoneCurrency) < milestoneCost then
+			return false
+		end
 	end
 
 	local reason = "upgrade:" .. upgradeId
@@ -159,9 +169,10 @@ function PurchaseValidator.TryPurchase(player: Player, upgradeId: unknown): bool
 		return false
 	end
 	if milestoneCost > 0 and not CurrencyLedger.Deduct(player, milestoneCurrency, milestoneCost, reason) then
-		-- Unreachable today (nothing yields between the pre-checks and here),
-		-- but if a future edit introduces a yield, the base cost must not be
-		-- silently eaten.
+		-- Belt-and-braces: nothing yields between the pre-checks and here, so
+		-- this fails only if a wallet-layer guard (MatrixGuard) or a corrupt
+		-- stored balance rejected the second deduct — either way the base
+		-- cost must not be silently eaten.
 		CurrencyLedger.Add(player, baseCurrency, cost, reason .. ":refund")
 		return false
 	end
