@@ -1,0 +1,11 @@
+{
+	// Bind .luau files to the Luau language server (JohnnyMorganz.luau-lsp).
+	// Without this, the plain-Lua extension (sumneko) can grab them and report
+	// hundreds of bogus syntax errors at the first Luau-only construct
+	// (optional types `number?`, `export type`, `::` casts, ...).
+	"files.associations": {
+		"*.luau": "luau"
+	},
+	"luau-lsp.platform.type": "roblox",
+	"luau-lsp.sourcemap.enabled": true
+}
