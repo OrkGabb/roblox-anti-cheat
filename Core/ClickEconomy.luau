@@ -21,6 +21,12 @@
 -- the config gates every remote-driven click with BOTH signals (rate + timing
 -- regularity). Enable it only if your client fires one remote per physical
 -- click — see the warning in RateLimiter.luau about fixed-cadence batchers.
+--
+-- Persisted-state distrust: the profile is data the client can influence
+-- (tampered saves, legacy migrations), so ClickAccumulator is validated on
+-- every read — it is a remainder and must sit in [0, clicksPerMint); anything
+-- else is reset rather than honored, because a forged huge accumulator would
+-- otherwise mint its entire backlog in one call.
 
 local Contract = require(script.Parent.Contract)
 local CurrencyLedger = require(script.Parent.CurrencyLedger)
@@ -61,6 +67,22 @@ local function getConfig(): (Config, RateLimiter.RateLimiter)
 		error("[ClickEconomy] Init() must be called before use", 3)
 	end
 	return config, limiter
+end
+
+-- Misconfiguration warnings ride the click hot path (up to clickRefillRate
+-- per second per player), so they are throttled per key instead of flooding
+-- the log at click rate.
+local WARN_INTERVAL = 5
+local lastWarnAt: { [string]: number } = {}
+
+local function warnThrottled(key: string, message: string): ()
+	local now = os.clock()
+	local last = lastWarnAt[key]
+	if last ~= nil and now - last < WARN_INTERVAL then
+		return
+	end
+	lastWarnAt[key] = now
+	warn(message)
 end
 
 -- The stored config is a guarded copy (nested secondaryMint included) — the
@@ -117,7 +139,23 @@ local function credit(config: Config, player: Player, clickCount: number): ()
 			-- fields were read/written out of step; a single accumulator field
 			-- has no second value to drift against — the balance is always a
 			-- concrete integer with no prediction or stale-read surface.
-			local accumulator = ((state.ClickAccumulator :: number?) or 0) + clickCount
+			--
+			-- The persisted value is untrusted (header): a legitimate carry is
+			-- always a remainder in [0, clicksPerMint), so anything outside
+			-- that — NaN, Infinity, negative, non-number, or a forged backlog
+			-- of a billion "clicks" — is reset, never minted.
+			local raw = state.ClickAccumulator
+			local carried = 0
+			if typeof(raw) == "number" and raw == raw and raw >= 0 and raw < mint.clicksPerMint then
+				carried = raw
+			elseif raw ~= nil then
+				warnThrottled("ClickEconomy.accumulator", string.format(
+					"[ClickEconomy] %s had a corrupt ClickAccumulator (%s) — reset to 0",
+					player.Name,
+					tostring(raw)
+				))
+			end
+			local accumulator = carried + clickCount
 			local minted = accumulator // mint.clicksPerMint
 			state.ClickAccumulator = accumulator % mint.clicksPerMint
 			if minted > 0 then
