@@ -111,6 +111,11 @@ end
 -- design — DataStore awards — and the in-flight PurchaseId guard is what
 -- makes that safe.
 function ReceiptProcessor.Init(config: Config): ()
+	-- One-shot: this module owns the game's single ProcessReceipt assignment;
+	-- a second Init could silently re-point the grant path.
+	if _config then
+		error("[ReceiptProcessor] Init() may only be called once", 2)
+	end
 	_config = {
 		getReceiptLedger = Contract.NonYielding("ReceiptProcessor.getReceiptLedger", config.getReceiptLedger),
 		grant = config.grant,

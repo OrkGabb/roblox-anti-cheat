@@ -51,7 +51,17 @@ local lastAccrual: { [Player]: number } = {}
 -- violation can never wedge a player's accrual shut past their session.
 local processing: { [Player]: boolean } = {}
 
+local _initialized = false
+
 function PassiveAccrual.Init(config: Config): ()
+	-- One-shot: a second Init would connect a second Heartbeat accrual loop
+	-- (and a second set of player-lifecycle handlers) over the same shared
+	-- clock table.
+	if _initialized then
+		error("[PassiveAccrual] Init() may only be called once", 2)
+	end
+	_initialized = true
+
 	-- Guarded copy; the integrator's table is never mutated. A yielding
 	-- getRates is contained by the wrapper (reads as nil -> tick skipped), so
 	-- the processing lock below becomes belt-and-braces rather than the only

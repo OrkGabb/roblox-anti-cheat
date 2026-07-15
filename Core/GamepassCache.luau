@@ -131,6 +131,11 @@ end
 -- wrapped: it fires after cache and history are written and may legitimately
 -- start async work.
 function GamepassCache.Init(rawConfig: Config): ()
+	-- One-shot: a second Init would connect duplicate lifecycle/purchase
+	-- handlers and let runtime code swap the pass table or history callback.
+	if _config then
+		error("[GamepassCache] Init() may only be called once", 2)
+	end
 	local config: Config = {
 		passes = rawConfig.passes,
 		getPersistedHistory = Contract.NonYieldingOpt(

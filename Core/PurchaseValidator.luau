@@ -67,6 +67,9 @@ end
 -- wrapped: it fires after every state write has landed and may legitimately
 -- start async work (sync to client, quests, analytics).
 function PurchaseValidator.Init(config: Config): ()
+	if _config then
+		error("[PurchaseValidator] Init() may only be called once", 2)
+	end
 	_config = {
 		getMaxLevel = Contract.NonYielding("PurchaseValidator.getMaxLevel", config.getMaxLevel),
 		getCost = Contract.NonYielding("PurchaseValidator.getCost", config.getCost),

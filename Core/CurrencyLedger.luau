@@ -84,7 +84,14 @@ end
 -- mutated. getWallet and onMutation both run inside the atomic mutation path,
 -- so both carry the non-yielding contract (see Contract.luau); a violating
 -- callback is contained and the mutation fails closed.
+--
+-- One-shot by design: the module table is frozen and Init refuses a second
+-- call, so runtime code can never re-point getWallet at an unguarded wallet
+-- or swap the audit hook after boot.
 function CurrencyLedger.Init(config: Config): ()
+	if _config then
+		error("[CurrencyLedger] Init() may only be called once", 2)
+	end
 	_config = {
 		getWallet = Contract.NonYielding("CurrencyLedger.getWallet", config.getWallet),
 		onMutation = Contract.NonYieldingOpt("CurrencyLedger.onMutation", config.onMutation),

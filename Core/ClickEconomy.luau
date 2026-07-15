@@ -88,7 +88,13 @@ end
 -- The stored config is a guarded copy (nested secondaryMint included) — the
 -- integrator's tables are never mutated. Every callback below runs inside
 -- credit()'s must-not-yield window, so all carry the non-yielding contract.
+--
+-- One-shot by design (module frozen, second Init refused): runtime code can
+-- never swap the payout callbacks or replace the limiter after boot.
 function ClickEconomy.Init(config: Config): ()
+	if _config then
+		error("[ClickEconomy] Init() may only be called once", 2)
+	end
 	local mint = config.secondaryMint
 	_config = {
 		primaryCurrency = config.primaryCurrency,
