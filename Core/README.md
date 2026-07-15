@@ -22,6 +22,7 @@ into `ServerScriptService` and wire your own data/config in through `Init`.
 | `GamepassCache` | O(1) ownership checks with the fail-safe-to-false pattern: a MarketplaceService error can never grant a paid effect. Optional persisted-history fallback. |
 | `GuidClaimTicket` | One-shot GUID claim tickets: consumed on first sight, so double-claims/replays are structurally impossible. |
 | `Contract` | Runtime enforcement of the non-yielding contract on your injected callbacks (getWallet, getRates, ...). A callback that yields is contained, logged, and dropped — fail-closed. Applied automatically inside every `Init`; nothing to wire. |
+| `MatrixGuard` | Standalone last-line invariant layer: wraps the wallet table in a validating proxy with a provable per-currency gain ceiling (token budget), a 10x delta envelope that halts runaway transactions for manual reconciliation, and absolute balance caps. Frozen at boot, fail-closed on its own errors, zero coupling to the other modules. |
 
 ## Wiring (one server script)
 
@@ -34,11 +35,35 @@ local PurchaseValidator = require(Core.PurchaseValidator)
 local ReceiptProcessor = require(Core.ReceiptProcessor)
 local GamepassCache = require(Core.GamepassCache)
 
--- 1) The choke point. getWallet returns your profile's currency table.
+-- 0) Optional but recommended: the invariant layer. Caps are numbers you
+-- choose from your economy's real ceiling (best gear, all multipliers, top
+-- gamepass) — MatrixGuard knows nothing about your game beyond them.
+local MatrixGuard = require(Core.MatrixGuard)
+MatrixGuard.Init({
+	caps = {
+		["*"] = { maxGainPerMinute = 50_000, maxExpectedDelta = 10_000 },
+		Primary = { maxGainPerMinute = 250_000, maxExpectedDelta = 100_000, maxBalance = 1e12 },
+	},
+	onViolation = function(entry)
+		-- alert webhook / analytics; the write was already rejected
+	end,
+})
+local walletProxies: { [Player]: any } = {}
+Players.PlayerRemoving:Connect(function(player) walletProxies[player] = nil end)
+
+-- 1) The choke point. getWallet returns your profile's currency table —
+-- wrapped, so every mutation is invariant-checked. Wrap what you RETURN;
+-- never assign the proxy into profile.Data (it must not be serialized).
 CurrencyLedger.Init({
 	getWallet = function(player)
 		local profile = MyData.Profiles[player]
-		return profile and profile.Data.Currencies
+		if not profile then return nil end
+		local proxy = walletProxies[player]
+		if not proxy then
+			proxy = MatrixGuard.WrapWallet(player, profile.Data.Currencies)
+			walletProxies[player] = proxy
+		end
+		return proxy
 	end,
 	onMutation = function(player, currency, delta, newBalance, reason)
 		-- optional: analytics / audit log
