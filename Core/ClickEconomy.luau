@@ -26,7 +26,10 @@
 -- (tampered saves, legacy migrations), so ClickAccumulator is validated on
 -- every read — it is a remainder and must sit in [0, clicksPerMint); anything
 -- else is reset rather than honored, because a forged huge accumulator would
--- otherwise mint its entire backlog in one call.
+-- otherwise mint its entire backlog in one call. Multiplier callbacks
+-- are clamped to finite non-negative (neutral 1 on garbage) so one bad
+-- integrator formula degrades payouts to baseline instead of silently eating
+-- clicks or erroring the pipeline.
 
 local Contract = require(script.Parent.Contract)
 local CurrencyLedger = require(script.Parent.CurrencyLedger)
@@ -85,6 +88,23 @@ local function warnThrottled(key: string, message: string): ()
 	warn(message)
 end
 
+-- Multipliers must be finite and non-negative; anything else (NaN/inf from an
+-- overflowed stacking formula, a non-number) degrades to neutral 1 — the
+-- player earns baseline instead of the pipeline erroring or silently eating
+-- granted clicks.
+local function sanitizeMultiplier(player: Player, name: string, value: number): number
+	if typeof(value) ~= "number" or value ~= value or value >= math.huge or value < 0 then
+		warnThrottled(name, string.format(
+			"[ClickEconomy] %s returned %s for %s — using neutral 1",
+			name,
+			tostring(value),
+			player.Name
+		))
+		return 1
+	end
+	return value
+end
+
 -- The stored config is a guarded copy (nested secondaryMint included) — the
 -- integrator's tables are never mutated. Every callback below runs inside
 -- credit()'s must-not-yield window, so all carry the non-yielding contract.
@@ -124,11 +144,21 @@ end
 
 -- The single payout path. `clickCount` is already validated by the caller.
 local function credit(config: Config, player: Player, clickCount: number): ()
-	local incomeMultiplier = if config.getIncomeMultiplier then config.getIncomeMultiplier(player) else 1
+	local incomeMultiplier = if config.getIncomeMultiplier
+		then sanitizeMultiplier(player, "ClickEconomy.getIncomeMultiplier", config.getIncomeMultiplier(player))
+		else 1
+	local perClick = config.getClickPower(player)
+	if typeof(perClick) ~= "number" or perClick ~= perClick or perClick >= math.huge then
+		warnThrottled("ClickEconomy.getClickPower", string.format(
+			"[ClickEconomy] getClickPower returned %s for %s — click income skipped",
+			tostring(perClick),
+			player.Name
+		))
+		perClick = 0
+	end
 	-- Floor the per-click value (not the total) so payout scales exactly
-	-- linearly with click count; a NaN/Infinity from a bad multiplier is then
-	-- rejected by the ledger, never written.
-	local gain = math.floor(config.getClickPower(player) * incomeMultiplier) * clickCount
+	-- linearly with click count.
+	local gain = math.floor(perClick * incomeMultiplier) * clickCount
 	if gain > 0 then
 		CurrencyLedger.Add(player, config.primaryCurrency or "Primary", gain, "click")
 	end
@@ -165,7 +195,9 @@ local function credit(config: Config, player: Player, clickCount: number): ()
 			local minted = accumulator // mint.clicksPerMint
 			state.ClickAccumulator = accumulator % mint.clicksPerMint
 			if minted > 0 then
-				local mintMultiplier = if mint.getMintMultiplier then mint.getMintMultiplier(player) else 1
+				local mintMultiplier = if mint.getMintMultiplier
+					then sanitizeMultiplier(player, "ClickEconomy.secondaryMint.getMintMultiplier", mint.getMintMultiplier(player))
+					else 1
 				CurrencyLedger.Add(player, mint.currency, minted * mintMultiplier, "click-mint")
 			end
 		end
