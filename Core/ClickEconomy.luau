@@ -176,7 +176,15 @@ end
 -- `requested` is the raw remote argument. Returns the number of clicks
 -- actually credited (0 = rejected/empty bucket/macro flag), which is also all
 -- the caller needs for optional feedback to the client.
-function ClickEconomy.ProcessClicks(player: Player, requested: unknown): number
+--
+-- `clientTimestamps` (optional, raw remote argument) feeds the macro
+-- detector's claimed-timestamp consistency channel: the client's own claimed
+-- per-click times. Untrusted by design and only ever self-incriminating —
+-- machine-regular claims admit the macro, and claimed jitter the arrival
+-- stream physically lacks proves fabrication (see RateLimiter header). Wire
+-- it only when macroDetection is enabled and the client actually stamps each
+-- click; malformed payloads disable the channel for the call, never punish.
+function ClickEconomy.ProcessClicks(player: Player, requested: unknown, clientTimestamps: unknown?): number
 	local config, limiter = getConfig()
 
 	local count: number
@@ -191,7 +199,15 @@ function ClickEconomy.ProcessClicks(player: Player, requested: unknown): number
 		return 0
 	end
 
-	local granted = limiter:Consume(player, count)
+	-- Shape gate only; the limiter's ingest gate fully validates contents
+	-- (finite, ordered, sanely sized) and turns anything else into "channel
+	-- off for this call".
+	local timestamps: { number }? = nil
+	if typeof(clientTimestamps) == "table" then
+		timestamps = clientTimestamps :: any
+	end
+
+	local granted = limiter:Consume(player, count, timestamps)
 	if granted <= 0 then
 		return 0
 	end
