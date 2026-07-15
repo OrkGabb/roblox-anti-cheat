@@ -17,6 +17,13 @@
 --     credit the whole load time as a startup burst.
 --   * Payouts are elapsed-time based (rate * seconds since last credit), so
 --     Heartbeat jitter can never over- or under-pay.
+--   * Accrual is per-player serialized. getRates is contractually
+--     non-yielding, but if one ever yields anyway, overlapping Heartbeat
+--     handlers would resume with stale timestamps, rewind `lastAccrual` below
+--     the credited watermark, and re-credit the rewound window every
+--     occurrence. A player with a getRates call still in flight is skipped
+--     (not queued) until it returns, and each player's timestamps are taken
+--     inside their own iteration so a resume can never write an old clock.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -38,12 +45,18 @@ export type Config = {
 -- must stay in-memory).
 local lastAccrual: { [Player]: number } = {}
 
+-- Players with a getRates call in flight (see the serialization bullet in the
+-- header). Entries are cleared on return, error, and PlayerRemoving, so a
+-- violation can never wedge a player's accrual shut past their session.
+local processing: { [Player]: boolean } = {}
+
 function PassiveAccrual.Init(config: Config): ()
 	Players.PlayerAdded:Connect(function(player: Player)
 		lastAccrual[player] = os.clock()
 	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		lastAccrual[player] = nil
+		processing[player] = nil
 	end)
 	-- Players already present when the server boots (Studio Play solo, late require).
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -59,14 +72,28 @@ function PassiveAccrual.Init(config: Config): ()
 		end
 		acc = 0
 
-		local now = os.clock()
 		for _, player in ipairs(Players:GetPlayers()) do
+			if processing[player] then
+				continue
+			end
+
+			-- Taken per-iteration, never hoisted: a handler resuming from a
+			-- yielded getRates continues this loop, and a hoisted `now` would
+			-- be stale by then (the clock-rewind in the header).
+			local now = os.clock()
 			-- Always advance the clock, even before the profile loads (no
 			-- startup burst — see header).
 			local last = lastAccrual[player] or now
 			lastAccrual[player] = now
 
-			local rates = config.getRates(player)
+			processing[player] = true
+			local ok, rates = pcall(config.getRates, player)
+			processing[player] = nil
+
+			if not ok then
+				warn(string.format("[PassiveAccrual] getRates errored for %s: %s", player.Name, tostring(rates)))
+				continue
+			end
 			if not rates then
 				continue
 			end
