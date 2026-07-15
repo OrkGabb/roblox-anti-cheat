@@ -21,6 +21,7 @@ into `ServerScriptService` and wire your own data/config in through `Init`.
 | `ReceiptProcessor` | Single idempotent `ProcessReceipt` owner: persisted PurchaseId ledger, mark-after-grant, in-flight guard against re-delivery mid-grant. |
 | `GamepassCache` | O(1) ownership checks with the fail-safe-to-false pattern: a MarketplaceService error can never grant a paid effect. Optional persisted-history fallback. |
 | `GuidClaimTicket` | One-shot GUID claim tickets: consumed on first sight, so double-claims/replays are structurally impossible. |
+| `Contract` | Runtime enforcement of the non-yielding contract on your injected callbacks (getWallet, getRates, ...). A callback that yields is contained, logged, and dropped — fail-closed. Applied automatically inside every `Init`; nothing to wire. |
 
 ## Wiring (one server script)
 

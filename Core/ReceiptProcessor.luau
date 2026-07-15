@@ -28,6 +28,8 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 
+local Contract = require(script.Parent.Contract)
+
 local ReceiptProcessor = {}
 
 export type Config = {
@@ -101,8 +103,18 @@ function ReceiptProcessor.Process(receiptInfo: any): Enum.ProductPurchaseDecisio
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
+-- The stored config is a guarded copy — the integrator's table is never
+-- mutated. getReceiptLedger runs in the idempotency check before the grant,
+-- where a yield would open a duplicate-delivery window ahead of the in-flight
+-- guard (a violation reads as no-ledger -> NotProcessedYet, and Roblox
+-- retries). `grant` is deliberately NOT wrapped: yielding is legal there by
+-- design — DataStore awards — and the in-flight PurchaseId guard is what
+-- makes that safe.
 function ReceiptProcessor.Init(config: Config): ()
-	_config = config
+	_config = {
+		getReceiptLedger = Contract.NonYielding("ReceiptProcessor.getReceiptLedger", config.getReceiptLedger),
+		grant = config.grant,
+	}
 	MarketplaceService.ProcessReceipt = ReceiptProcessor.Process
 end
 

@@ -22,6 +22,7 @@
 -- this module's level machinery: recompute the price from your registry,
 -- CurrencyLedger.Deduct, and grant only on true — same invariant, two lines.
 
+local Contract = require(script.Parent.Contract)
 local CurrencyLedger = require(script.Parent.CurrencyLedger)
 
 local PurchaseValidator = {}
@@ -59,8 +60,20 @@ local function isFiniteNonNegative(n: number): boolean
 	return n == n and n < math.huge and n >= 0
 end
 
+-- The stored config is a guarded copy — the integrator's table is never
+-- mutated. The registry/state callbacks all run inside TryPurchase's
+-- check-then-deduct window, whose atomicity is the module's whole point, so
+-- they carry the non-yielding contract. onPurchased is deliberately NOT
+-- wrapped: it fires after every state write has landed and may legitimately
+-- start async work (sync to client, quests, analytics).
 function PurchaseValidator.Init(config: Config): ()
-	_config = config
+	_config = {
+		getMaxLevel = Contract.NonYielding("PurchaseValidator.getMaxLevel", config.getMaxLevel),
+		getCost = Contract.NonYielding("PurchaseValidator.getCost", config.getCost),
+		getMilestoneCost = Contract.NonYieldingOpt("PurchaseValidator.getMilestoneCost", config.getMilestoneCost),
+		getUpgrades = Contract.NonYielding("PurchaseValidator.getUpgrades", config.getUpgrades),
+		onPurchased = config.onPurchased,
+	}
 end
 
 -- Clamps saved upgrade levels to their registry cap. Call once per player

@@ -28,6 +28,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
+local Contract = require(script.Parent.Contract)
 local CurrencyLedger = require(script.Parent.CurrencyLedger)
 
 local PassiveAccrual = {}
@@ -51,6 +52,15 @@ local lastAccrual: { [Player]: number } = {}
 local processing: { [Player]: boolean } = {}
 
 function PassiveAccrual.Init(config: Config): ()
+	-- Guarded copy; the integrator's table is never mutated. A yielding
+	-- getRates is contained by the wrapper (reads as nil -> tick skipped), so
+	-- the processing lock below becomes belt-and-braces rather than the only
+	-- line of defense.
+	config = {
+		tickInterval = config.tickInterval,
+		getRates = Contract.NonYielding("PassiveAccrual.getRates", config.getRates),
+	}
+
 	Players.PlayerAdded:Connect(function(player: Player)
 		lastAccrual[player] = os.clock()
 	end)

@@ -22,6 +22,7 @@
 -- regularity). Enable it only if your client fires one remote per physical
 -- click — see the warning in RateLimiter.luau about fixed-cadence batchers.
 
+local Contract = require(script.Parent.Contract)
 local CurrencyLedger = require(script.Parent.CurrencyLedger)
 local RateLimiter = require(script.Parent.RateLimiter)
 
@@ -62,8 +63,30 @@ local function getConfig(): (Config, RateLimiter.RateLimiter)
 	return config, limiter
 end
 
+-- The stored config is a guarded copy (nested secondaryMint included) — the
+-- integrator's tables are never mutated. Every callback below runs inside
+-- credit()'s must-not-yield window, so all carry the non-yielding contract.
 function ClickEconomy.Init(config: Config): ()
-	_config = config
+	local mint = config.secondaryMint
+	_config = {
+		primaryCurrency = config.primaryCurrency,
+		getClickPower = Contract.NonYielding("ClickEconomy.getClickPower", config.getClickPower),
+		getIncomeMultiplier = Contract.NonYieldingOpt("ClickEconomy.getIncomeMultiplier", config.getIncomeMultiplier),
+		maxClickBurst = config.maxClickBurst,
+		clickRefillRate = config.clickRefillRate,
+		macroDetection = config.macroDetection,
+		secondaryMint = if mint
+			then {
+				currency = mint.currency,
+				clicksPerMint = mint.clicksPerMint,
+				getState = Contract.NonYielding("ClickEconomy.secondaryMint.getState", mint.getState),
+				getMintMultiplier = Contract.NonYieldingOpt(
+					"ClickEconomy.secondaryMint.getMintMultiplier",
+					mint.getMintMultiplier
+				),
+			}
+			else nil,
+	}
 	_limiter = RateLimiter.new({
 		maxBurst = config.maxClickBurst or 30,
 		refillRate = config.clickRefillRate or 20,

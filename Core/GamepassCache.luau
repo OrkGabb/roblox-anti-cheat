@@ -35,6 +35,8 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 
+local Contract = require(script.Parent.Contract)
+
 local GamepassCache = {}
 
 export type Config = {
@@ -121,7 +123,22 @@ function GamepassCache.GetStackedMultiplier(player: Player, multipliers: { [stri
 	return result
 end
 
-function GamepassCache.Init(config: Config): ()
+-- The stored config is a guarded copy — the integrator's table is never
+-- mutated. getPersistedHistory runs inside Owns, whose "never yields, never
+-- errors" guarantee crediting paths depend on, so it carries the non-yielding
+-- contract (a violation reads as no-history -> fail-safe false). The purchase
+-- handler closes over this same copy. onOwnershipChanged is deliberately NOT
+-- wrapped: it fires after cache and history are written and may legitimately
+-- start async work.
+function GamepassCache.Init(rawConfig: Config): ()
+	local config: Config = {
+		passes = rawConfig.passes,
+		getPersistedHistory = Contract.NonYieldingOpt(
+			"GamepassCache.getPersistedHistory",
+			rawConfig.getPersistedHistory
+		),
+		onOwnershipChanged = rawConfig.onOwnershipChanged,
+	}
 	_config = config
 
 	-- The single allocation site (see lifetime invariant in the header). The

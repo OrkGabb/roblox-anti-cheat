@@ -24,6 +24,8 @@
 --     There is no separate read-balance-then-write window for another request
 --     to interleave into (Luau tasks only switch at yields).
 
+local Contract = require(script.Parent.Contract)
+
 local CurrencyLedger = {}
 
 export type MutationHook = (player: Player, currency: string, delta: number, newBalance: number, reason: string) -> ()
@@ -55,8 +57,15 @@ local function isValidAmount(amount: number): boolean
 	return typeof(amount) == "number" and amount == amount and amount < math.huge and amount >= 0
 end
 
+-- The stored config is a guarded copy — the integrator's table is never
+-- mutated. getWallet and onMutation both run inside the atomic mutation path,
+-- so both carry the non-yielding contract (see Contract.luau); a violating
+-- callback is contained and the mutation fails closed.
 function CurrencyLedger.Init(config: Config): ()
-	_config = config
+	_config = {
+		getWallet = Contract.NonYielding("CurrencyLedger.getWallet", config.getWallet),
+		onMutation = Contract.NonYieldingOpt("CurrencyLedger.onMutation", config.onMutation),
+	}
 end
 
 function CurrencyLedger.Get(player: Player, currency: string): number

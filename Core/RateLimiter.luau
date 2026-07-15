@@ -393,7 +393,10 @@ local function fireFlag(
 		state.suspicionScore
 	))
 	if macro.onFlagged then
-		macro.onFlagged(player, sigma, state.suspicionScore, {
+		-- Spawned, not called inline: onFlagged is policy (kick/ban/logging)
+		-- and may legitimately yield, but it fires mid-Consume — a yield here
+		-- would suspend the caller's crediting path around the flag.
+		task.spawn(macro.onFlagged, player, sigma, state.suspicionScore, {
 			reasons = reasons,
 			evidence = state.evidence,
 			flagCount = state.suspicionScore,
