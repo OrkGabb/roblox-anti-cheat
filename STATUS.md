@@ -193,6 +193,69 @@ the click accumulator, per ClickGame's model; README notes both).
   double-credit, startup-burst crediting, window-boundary burst straddle,
   frozen-bucket refill footgun) — the credibility requirement.
 
+## Hardening pass (2026-07-15)
+
+Adversarial review of the unified set. Fixes, in severity order:
+
+1. **CurrencyLedger: corrupt-stored-balance bypass (real logic bug).** Only
+   the *amount* was validated; the *stored* balance was trusted. A NaN already
+   in the wallet (tampered/legacy save, or a pre-adoption direct write) makes
+   `balance < amount` false for every amount — **every Deduct succeeds**,
+   i.e. unlimited free purchases. Add/Deduct now reject a non-finite/negative/
+   non-number stored balance (fail closed, loud), `Get` reads it as 0 so no
+   caller's affordability math is poisoned, and Add additionally rejects a
+   credit that would overflow the balance to Infinity.
+2. **CurrencyLedger x MatrixGuard: error propagation into Heartbeat loops.**
+   A MatrixGuard-rejected write raises; uncontained, that error unwound
+   PassiveAccrual's per-tick player loop — every player iterated *after* the
+   rejected one was starved of passive income for as long as the rejection
+   repeated. The wallet write is now pcall-contained in the ledger and a
+   rejection reads as a failed mutation (`false`) — still never phantom
+   success, still journaled/alerted by MatrixGuard, but one player's
+   violation can no longer degrade service for others.
+3. **ClickEconomy: forged-accumulator instant mint.** The persisted
+   `ClickAccumulator` was trusted; a legitimate value is always a remainder in
+   `[0, clicksPerMint)`, so a forged/legacy value of e.g. 1e15 would mint its
+   entire backlog in one call. Out-of-range/non-finite values are now reset
+   to 0 (never honored), with a throttled warning.
+4. **PurchaseValidator: same-currency milestone pre-check.** When the
+   milestone cost is paid in the *same* currency as the base cost, the two
+   individual pre-checks could both pass while the sum exceeded the balance
+   (the refund path — previously commented "unreachable" — was in fact
+   reachable this way). The pre-check now tests the sum for same-currency
+   milestones; the refund stays as belt-and-braces for wallet-layer
+   rejections.
+5. **Immutability, extended from MatrixGuard to the whole layer.** Every
+   module table is now `table.freeze`d and every `Init` is one-shot. Before,
+   only MatrixGuard was frozen: runtime server code could monkey-patch
+   `CurrencyLedger.Add`, replace `Contract.NonYielding` with a pass-through,
+   or re-`Init` the ledger with a `getWallet` that skips the MatrixGuard
+   proxy — exactly the "turn one mechanism off" scenario the invariant layer
+   exists to survive. Duplicate-Init also previously double-connected
+   PassiveAccrual's Heartbeat loop and GamepassCache's purchase handlers.
+6. **Macro detector: claimed-timestamp channel activated.**
+   `RateLimiter.Consume` already implemented the consistency channel, but
+   `ClickEconomy.ProcessClicks` never forwarded anything into it — the
+   channel was dormant. ProcessClicks now takes an optional third argument
+   (raw remote payload; shape-gated here, fully validated by the limiter's
+   ingest gate, malformed input disables the channel rather than punishing).
+7. **ClickEconomy: multiplier/click-power sanitization.** NaN/inf/negative
+   multipliers now degrade to neutral 1 (baseline pay) and a non-finite
+   click power skips income — both with throttled warnings — instead of
+   silently consuming the player's granted clicks or relying on the ledger
+   reject to warn at click rate.
+8. **Boot-time config validation.** `RateLimiter.new` rejects
+   non-finite/non-positive `maxBurst`/`refillRate` (a NaN there silently
+   freezes the bucket math); `GuidClaimTicket.new` rejects a non-finite
+   `maxLife` (NaN makes every expiry comparison false). Misconfiguration now
+   fails at wiring time, not at exploit time. `RateLimiter:Destroy()` added
+   for integrators who create limiters dynamically (the PlayerRemoving
+   connection otherwise pins the instance forever).
+9. **MatrixGuard doc: Luau `pairs()` caveat.** `pairs(proxy)` bypasses
+   metamethods and sees an empty table; wallet iteration must use generalized
+   iteration (`for k, v in wallet`), which the proxy supports via `__iter`.
+   Documented in the header and the wiring guide.
+
 ## Scope discipline
 
 Nothing outside currency/inventory integrity was added: no movement/combat

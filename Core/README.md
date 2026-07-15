@@ -9,6 +9,18 @@ All modules are `--!strict`, dependency-free besides each other, and
 config-injected — they never `require` your game's registries. Drop the folder
 into `ServerScriptService` and wire your own data/config in through `Init`.
 
+**Tamper resistance:** every module table is `table.freeze`d and every `Init`
+is one-shot (a second call errors). Runtime code — including a compromised or
+buggy server script required later — cannot monkey-patch `CurrencyLedger.Add`,
+re-point `getWallet` around MatrixGuard, swap the `Contract` enforcement
+wrapper, or re-`Init` a module with looser callbacks. Changing the wiring
+means changing the boot script and restarting the server.
+
+**Persisted state is untrusted:** stored balances, click accumulators, and
+saved upgrade levels are all validated at the point of use (corrupt/forged
+values are rejected or reset, never honored), because profile data is
+ultimately client-influenced input with a delay.
+
 ## Modules
 
 | Module | Concern |
@@ -50,6 +62,9 @@ MatrixGuard.Init({
 })
 local walletProxies: { [Player]: any } = {}
 Players.PlayerRemoving:Connect(function(player) walletProxies[player] = nil end)
+-- Iteration caveat: `pairs(proxy)` bypasses metamethods and sees an empty
+-- table — iterate wallets with `for currency, balance in wallet do`
+-- (generalized iteration honors the proxy), or read via CurrencyLedger.Get.
 
 -- 1) The choke point. getWallet returns your profile's currency table —
 -- wrapped, so every mutation is invariant-checked. Wrap what you RETURN;
@@ -99,8 +114,12 @@ ClickEconomy.Init({
 		end,
 	},
 })
-clickRemote.OnServerEvent:Connect(function(player, batch)
-	ClickEconomy.ProcessClicks(player, batch)
+clickRemote.OnServerEvent:Connect(function(player, batch, timestamps)
+	-- `timestamps` (optional) feeds the macro detector's claimed-timestamp
+	-- channel when macroDetection is on and your client stamps each click
+	-- (os.clock() at input time). Untrusted and only ever self-incriminating;
+	-- omit it entirely if your client doesn't send it.
+	ClickEconomy.ProcessClicks(player, batch, timestamps)
 end)
 -- Auto-clicker gamepass loop calls ClickEconomy.CreditServerClicks(player, 1).
 

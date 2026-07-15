@@ -68,6 +68,13 @@
 --       end,
 --   })
 --   -- and clear proxies[player] on PlayerRemoving.
+--
+-- Luau iteration caveat: `pairs(proxy)` bypasses metamethods and sees an
+-- EMPTY table. Iterate the wallet with generalized iteration
+-- (`for currency, balance in wallet do`), which the proxy supports via
+-- __iter, or read single balances via CurrencyLedger.Get. Serialization code
+-- must keep operating on the REAL table (which it already does if the proxy
+-- was never assigned into profile.Data, per the wiring above).
 
 local MatrixGuard = {}
 
