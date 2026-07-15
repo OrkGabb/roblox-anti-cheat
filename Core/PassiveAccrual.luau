@@ -130,4 +130,4 @@ function PassiveAccrual.Init(config: Config): ()
 	end)
 end
 
-return PassiveAccrual
+return table.freeze(PassiveAccrual)

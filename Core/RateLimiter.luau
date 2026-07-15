@@ -580,4 +580,6 @@ function RateLimiter.GetSuspicion(self: RateLimiter, player: Player): number
 	return if state then state.suspicionScore else 0
 end
 
-return RateLimiter
+-- Frozen class table: Consume/observe cannot be monkey-patched at runtime.
+-- (Instances still work — setmetatable only reads the frozen table.)
+return table.freeze(RateLimiter)

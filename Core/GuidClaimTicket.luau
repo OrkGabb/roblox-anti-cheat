@@ -105,4 +105,4 @@ function GuidClaimTicket.Claim(self: GuidClaimTicket, player: Player, guid: unkn
 	return issuedAt
 end
 
-return GuidClaimTicket
+return table.freeze(GuidClaimTicket)

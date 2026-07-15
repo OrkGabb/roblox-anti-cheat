@@ -233,4 +233,6 @@ function CurrencyLedger.Deduct(player: Player, currency: string, amount: number,
 	return true
 end
 
-return CurrencyLedger
+-- Frozen: no runtime code can replace Add/Deduct or attach new members —
+-- monkey-patching the choke point is not an available attack surface.
+return table.freeze(CurrencyLedger)

@@ -123,4 +123,4 @@ function ReceiptProcessor.Init(config: Config): ()
 	MarketplaceService.ProcessReceipt = ReceiptProcessor.Process
 end
 
-return ReceiptProcessor
+return table.freeze(ReceiptProcessor)

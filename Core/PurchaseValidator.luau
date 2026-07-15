@@ -188,4 +188,4 @@ function PurchaseValidator.TryPurchase(player: Player, upgradeId: unknown): bool
 	return true
 end
 
-return PurchaseValidator
+return table.freeze(PurchaseValidator)

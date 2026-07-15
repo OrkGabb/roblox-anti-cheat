@@ -215,4 +215,5 @@ function ClickEconomy.CreditServerClicks(player: Player, count: number): number
 	return clickCount
 end
 
-return ClickEconomy
+-- Frozen: ProcessClicks/CreditServerClicks cannot be replaced at runtime.
+return table.freeze(ClickEconomy)

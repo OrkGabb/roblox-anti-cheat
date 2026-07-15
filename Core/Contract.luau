@@ -91,4 +91,6 @@ function Contract.NonYieldingOpt<A..., R...>(name: string, fn: ((A...) -> R...)?
 	return Contract.NonYielding(name, fn)
 end
 
-return Contract
+-- Frozen: the enforcement wrapper itself must not be replaceable — swapping
+-- NonYielding for a pass-through would silently void every module's contract.
+return table.freeze(Contract)

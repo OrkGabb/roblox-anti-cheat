@@ -200,4 +200,4 @@ function GamepassCache.Init(rawConfig: Config): ()
 	)
 end
 
-return GamepassCache
+return table.freeze(GamepassCache)
