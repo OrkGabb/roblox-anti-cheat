@@ -32,6 +32,12 @@
 --     from Get, so no caller's comparison math is poisoned either).
 --   * Overflow rejection: a credit that would push the balance to Infinity is
 --     refused instead of written.
+--   * Contained wallet-layer rejection. The wallet returned by getWallet may
+--     be a validating proxy (MatrixGuard) that raises on an illegal write.
+--     The write is pcall-contained here so a rejection reads as a failed
+--     mutation (return false) — never phantom success, and never an unwound
+--     Heartbeat loop that starves every player iterated after the rejected
+--     one (PassiveAccrual credits inside such a loop).
 
 local Contract = require(script.Parent.Contract)
 
@@ -64,6 +70,14 @@ end
 -- skipped the balance check, so it is rejected.
 local function isValidAmount(amount: number): boolean
 	return typeof(amount) == "number" and amount == amount and amount < math.huge and amount >= 0
+end
+
+-- Raw write, isolated so it can be pcall-contained without a per-call closure:
+-- a validating wallet proxy (MatrixGuard) raises on an illegal write, and that
+-- rejection must become `false` from Add/Deduct, not an error unwinding the
+-- caller's crediting loop.
+local function writeBalance(wallet: { [string]: number }, currency: string, value: number): ()
+	wallet[currency] = value
 end
 
 -- The stored config is a guarded copy — the integrator's table is never
@@ -136,7 +150,18 @@ function CurrencyLedger.Add(player: Player, currency: string, amount: number, re
 		return false
 	end
 
-	wallet[currency] = newBalance
+	-- Cast: pcall's typed overload models only the success returns of a
+	-- () -> () function; the error value on the failure path needs ...any.
+	local okWrite, writeErr = pcall(writeBalance :: any, wallet, currency, newBalance)
+	if not okWrite then
+		warn(string.format(
+			"[CurrencyLedger] wallet layer rejected Add for %s.%s: %s",
+			player.Name,
+			currency,
+			tostring(writeErr)
+		))
+		return false
+	end
 	if config.onMutation then
 		config.onMutation(player, currency, amount, newBalance, reason or "add")
 	end
@@ -183,7 +208,18 @@ function CurrencyLedger.Deduct(player: Player, currency: string, amount: number,
 	end
 
 	local newBalance = balance - amount
-	wallet[currency] = newBalance
+	-- Cast: pcall's typed overload models only the success returns of a
+	-- () -> () function; the error value on the failure path needs ...any.
+	local okWrite, writeErr = pcall(writeBalance :: any, wallet, currency, newBalance)
+	if not okWrite then
+		warn(string.format(
+			"[CurrencyLedger] wallet layer rejected Deduct for %s.%s: %s",
+			player.Name,
+			currency,
+			tostring(writeErr)
+		))
+		return false
+	end
 	if config.onMutation then
 		config.onMutation(player, currency, -amount, newBalance, reason or "deduct")
 	end
