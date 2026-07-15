@@ -14,7 +14,7 @@ into `ServerScriptService` and wire your own data/config in through `Init`.
 | Module | Concern |
 |---|---|
 | `CurrencyLedger` | **The choke point.** Every credit is `Add`, every spend is `Deduct` (atomic check-then-write). NaN/Infinity/negative amounts rejected here, unbypassable. |
-| `RateLimiter` | Reusable per-player token bucket (burst + sustained rate) with optional sigma-based macro detection (flags machine-*regular* timing, not just fast timing). |
+| `RateLimiter` | Reusable per-player token bucket (burst + sustained rate) with optional multi-signal macro detection: regularity (CV + absolute floor), frame-gap entropy, uniform-jitter shape, client-timestamp consistency, and a separate batching-signature flag — fused into a decaying cumulative evidence score (flags machine-*regular* timing, not just fast timing). |
 | `ClickEconomy` | Click→currency pipeline: sanitized untrusted remote path and trusted server path share one payout/accumulator route. Mod-based carry-forward secondary minting (the double-credit-proof shape). |
 | `PassiveAccrual` | Passive income with in-memory-only accrual clock — rejoin can never double-credit, profile-load lag never pays a startup burst. |
 | `PurchaseValidator` | S2C upgrade purchases: cost/cap/milestone recomputed server-side from your registry, saved-level sanitization, ledger-only mutation. |
