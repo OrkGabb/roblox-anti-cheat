@@ -21,6 +21,16 @@
 -- From PSU: the optional persisted-history fallback ("GP_<id>" keys), which
 -- keeps Studio test purchases and passes bought during an outage honored via
 -- the profile even when the live lookup fails.
+--
+-- LIFETIME INVARIANT: `owned[player]` is allocated exactly once, synchronously
+-- at join (before Refresh's first web-call yield), and cleared only at
+-- PlayerRemoving — never nil while the player is in-game, and no handler ever
+-- allocates a replacement table. Signals that land after the player left
+-- (a mid-yield Refresh resuming; a late-delivered purchase event) find no
+-- entry and no-op. Reactive `owned[player] or {}` allocation in those handlers
+-- would instead resurrect a dead instance's entry — a permanent leak, since a
+-- Player instance never rejoins under the same key — or split ownership
+-- writes across two tables during the removal window.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
@@ -53,10 +63,14 @@ end
 
 -- Resolves and caches ownership of every configured pass for one player.
 -- YIELDS (web calls) — call from task.spawn. Safe to call again to refresh.
+-- No-ops for an untracked player (left, or never joined) — see the lifetime
+-- invariant in the header.
 function GamepassCache.Refresh(player: Player): ()
 	local config = getConfig()
-	local set = owned[player] or {}
-	owned[player] = set
+	local set = owned[player]
+	if not set then
+		return
+	end
 
 	for passKey, passId in pairs(config.passes) do
 		local ok, result = pcall(function()
@@ -110,15 +124,23 @@ end
 function GamepassCache.Init(config: Config): ()
 	_config = config
 
-	Players.PlayerAdded:Connect(function(player: Player)
+	-- The single allocation site (see lifetime invariant in the header). The
+	-- guard also collapses the join/boot-loop double-fire into one Refresh.
+	local function track(player: Player): ()
+		if owned[player] then
+			return
+		end
+		owned[player] = {}
 		task.spawn(GamepassCache.Refresh, player)
-	end)
+	end
+
+	Players.PlayerAdded:Connect(track)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		owned[player] = nil
 	end)
 	-- Players already present when the server boots (Studio Play solo, late require).
 	for _, player in ipairs(Players:GetPlayers()) do
-		task.spawn(GamepassCache.Refresh, player)
+		track(player)
 	end
 
 	-- In-game purchase: cache + persist immediately so the effect is live
@@ -129,10 +151,15 @@ function GamepassCache.Init(config: Config): ()
 			if not wasPurchased then
 				return
 			end
+			local set = owned[player]
+			if not set then
+				-- Delivered after PlayerRemoving: allocating here would
+				-- resurrect a dead entry (header). The pass itself is safe —
+				-- the web lookup honors it on next join.
+				return
+			end
 			for passKey, configId in pairs(config.passes) do
 				if configId == passId then
-					local set = owned[player] or {}
-					owned[player] = set
 					set[passKey] = true
 
 					if config.getPersistedHistory then
