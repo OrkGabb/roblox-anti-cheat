@@ -33,6 +33,11 @@ export type GuidClaimTicket = typeof(setmetatable(
 
 -- maxLife: seconds a GUID stays claimable after issue (e.g. DescentDuration + DescentTolerance).
 function GuidClaimTicket.new(maxLife: number): GuidClaimTicket
+	-- NaN here would make every expiry comparison false — tickets that never
+	-- expire in Expire() yet always fail in Claim(). Reject at wiring time.
+	if typeof(maxLife) ~= "number" or maxLife ~= maxLife or maxLife <= 0 or maxLife == math.huge then
+		error("[GuidClaimTicket] maxLife must be a finite positive number of seconds", 2)
+	end
 	local self = setmetatable({
 		_maxLife = maxLife,
 		_pending = {},

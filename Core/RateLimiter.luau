@@ -177,6 +177,7 @@ export type RateLimiter = typeof(setmetatable(
 		_refillRate: number,
 		_macro: MacroDetectionConfig?,
 		_states: { [Player]: PlayerState },
+		_connection: RBXScriptConnection,
 	},
 	RateLimiter
 ))
@@ -231,19 +232,42 @@ local function pushWindow(list: { number }, value: number, cap: number): ()
 	end
 end
 
+local function isFinitePositive(n: number): boolean
+	return typeof(n) == "number" and n == n and n > 0 and n < math.huge
+end
+
 function RateLimiter.new(config: Config): RateLimiter
+	-- Boot-time validation: a NaN/inf/non-positive limit would silently
+	-- disable the bucket (every clamp/min against it misbehaves). Fail loudly
+	-- at wiring time, not at exploit time.
+	if not isFinitePositive(config.maxBurst) or config.maxBurst < 1 then
+		error("[RateLimiter] maxBurst must be a finite number >= 1", 2)
+	end
+	if not isFinitePositive(config.refillRate) then
+		error("[RateLimiter] refillRate must be a finite positive number", 2)
+	end
+
 	local self = setmetatable({
 		_maxBurst = config.maxBurst,
 		_refillRate = config.refillRate,
 		_macro = config.macroDetection,
 		_states = {} :: { [Player]: PlayerState },
+		_connection = nil :: any,
 	}, RateLimiter)
 
-	Players.PlayerRemoving:Connect(function(player: Player)
+	self._connection = Players.PlayerRemoving:Connect(function(player: Player)
 		self._states[player] = nil
 	end)
 
 	return self
+end
+
+-- Disconnects the lifecycle listener and drops all state. Only needed if the
+-- integrator creates limiters dynamically; a limiter that lives for the whole
+-- server session never needs this.
+function RateLimiter.Destroy(self: RateLimiter): ()
+	self._connection:Disconnect()
+	table.clear(self._states)
 end
 
 local function getState(self: RateLimiter, player: Player, now: number): PlayerState
