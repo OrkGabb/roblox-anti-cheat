@@ -23,6 +23,15 @@
 --   * Atomic spend: Deduct checks and writes in one non-yielding function.
 --     There is no separate read-balance-then-write window for another request
 --     to interleave into (Luau tasks only switch at yields).
+--   * Corrupt STORED balance rejection. Validating only the amount is not
+--     enough: a NaN already sitting in the wallet (tampered/legacy save, or a
+--     direct write that bypassed the ledger before this module was adopted)
+--     makes `balance < amount` false for EVERY amount — every Deduct would
+--     succeed, which is unlimited free purchases. A non-finite/negative/
+--     non-number stored balance therefore fails the mutation (and reads as 0
+--     from Get, so no caller's comparison math is poisoned either).
+--   * Overflow rejection: a credit that would push the balance to Infinity is
+--     refused instead of written.
 
 local Contract = require(script.Parent.Contract)
 
@@ -73,7 +82,13 @@ function CurrencyLedger.Get(player: Player, currency: string): number
 	if not wallet then
 		return 0
 	end
-	return wallet[currency] or 0
+	local balance = wallet[currency] or 0
+	-- Corrupt stored balance reads as 0 (see header): a NaN returned here
+	-- would poison every caller-side `>=` affordability check.
+	if not isValidAmount(balance) then
+		return 0
+	end
+	return balance
 end
 
 -- Credits `amount` of `currency`. Returns false (and mutates nothing) if the
@@ -97,7 +112,30 @@ function CurrencyLedger.Add(player: Player, currency: string, amount: number, re
 		return false
 	end
 
-	local newBalance = (wallet[currency] or 0) + amount
+	local balance = wallet[currency] or 0
+	if not isValidAmount(balance) then
+		warn(string.format(
+			"[CurrencyLedger] %s.%s stored balance is corrupt (%s) — Add rejected (%s)",
+			player.Name,
+			currency,
+			tostring(balance),
+			reason or "?"
+		))
+		return false
+	end
+
+	local newBalance = balance + amount
+	if newBalance >= math.huge then
+		warn(string.format(
+			"[CurrencyLedger] Add of %.6g %s for %s overflows the balance — rejected (%s)",
+			amount,
+			currency,
+			player.Name,
+			reason or "?"
+		))
+		return false
+	end
+
 	wallet[currency] = newBalance
 	if config.onMutation then
 		config.onMutation(player, currency, amount, newBalance, reason or "add")
@@ -127,6 +165,19 @@ function CurrencyLedger.Deduct(player: Player, currency: string, amount: number,
 	end
 
 	local balance = wallet[currency] or 0
+	-- A corrupt stored balance MUST fail here, not fall through: NaN compares
+	-- false to everything, so `balance < amount` below would approve every
+	-- spend against a NaN balance — unlimited free purchases (see header).
+	if not isValidAmount(balance) then
+		warn(string.format(
+			"[CurrencyLedger] %s.%s stored balance is corrupt (%s) — Deduct rejected (%s)",
+			player.Name,
+			currency,
+			tostring(balance),
+			reason or "?"
+		))
+		return false
+	end
 	if balance < amount then
 		return false
 	end
